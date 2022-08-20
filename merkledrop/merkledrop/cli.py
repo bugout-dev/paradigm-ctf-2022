@@ -1,6 +1,5 @@
 import argparse
 import json
-from lib2to3.pgen2 import token
 
 from brownie import network
 from web3 import Web3
@@ -40,11 +39,12 @@ def score_validation(args: argparse.Namespace):
         sum_individual += individual_amount
 
     print(token_total, sum_individual)
+    print(json.dumps(individual_amounts, indent=2))
 
 
 def gen_leaf(index, account, amount):
     return Web3.solidityKeccak(
-        ["uint256", "address", "uint96"], [index, account, amount]
+        ["uint256", "address", "uint96"], [index, Web3.toChecksumAddress(account), amount]
     )
 
 
@@ -97,6 +97,21 @@ def claim_info(args: argparse.Namespace):
     print(f"Amount: {int(claim_info['amount'], 16)}")
     print(f"Proof: {' '.join(claim_info['proof'])}")
 
+def claim_all(args: argparse.Namespace):
+    network.connect(args.network)
+    tx_config = MerkleDistributor.get_transaction_config(args)
+
+    distributor = MerkleDistributor.MerkleDistributor(args.address)
+
+    with open(args.infile) as ifp:
+        merkle_tree = json.load(ifp)
+
+    for address, claim_info in merkle_tree["claims"].items():
+        index = claim_info["index"]
+        amount = int(claim_info["amount"], 16)
+        proof = claim_info["proof"]
+        distributor.claim(index, address, amount, proof, tx_config)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="merkledrop challenge")
     subparsers = parser.add_subparsers()
@@ -145,6 +160,11 @@ if __name__ == "__main__":
     claim_info_parser.add_argument("infile")
     claim_info_parser.add_argument("--claim", type=int)
     claim_info_parser.set_defaults(func=claim_info)
+
+    claim_all_parser = subparsers.add_parser("claim-all")
+    MerkleDistributor.add_default_arguments(claim_all_parser, True)
+    claim_all_parser.add_argument("infile")
+    claim_all_parser.set_defaults(func=claim_all)
 
     args = parser.parse_args()
     args.func(args)
