@@ -3,6 +3,8 @@ import json
 
 from web3 import Web3
 
+from . import MerkleDistributor, MerkleProof, Setup, Token
+
 def score_validation(args: argparse.Namespace):
     with open(args.infile) as ifp:
         merkle_tree = json.load(ifp)
@@ -75,6 +77,18 @@ if __name__ == "__main__":
     collide_parser.add_argument("--account", required=True)
     collide_parser.add_argument("--amount", type=int, required=True)
     collide_parser.set_defaults(func=collide)
+
+    merkle_distributor_parser = MerkleDistributor.generate_cli()
+    subparsers.add_parser("distributor", parents=[merkle_distributor_parser], add_help=False)
+
+    merkle_prover_parser = MerkleProof.generate_cli()
+    subparsers.add_parser("prover", parents=[merkle_prover_parser], add_help=False)
+
+    setup_parser = Setup.generate_cli()
+    subparsers.add_parser("setup", parents=[setup_parser], add_help=False)
+
+    token_parser = Token.generate_cli()
+    subparsers.add_parser("token", parents=[token_parser], add_help=False)
 
     args = parser.parse_args()
     args.func(args)
