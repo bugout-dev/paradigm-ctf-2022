@@ -1,9 +1,31 @@
 import argparse
 import json
+from lib2to3.pgen2 import token
 
+from brownie import network
 from web3 import Web3
 
 from . import MerkleDistributor, MerkleProof, Setup, Token
+
+
+def get_deployment_info(setup_address):
+    setup_contract = Setup.Setup(setup_address)
+    merkle_distributor_address = setup_contract.merkle_distributor()
+    token_address = setup_contract.token()
+    return {
+        "setup_address": setup_address,
+        "merkle_distributor_address": merkle_distributor_address,
+        "token_address": token_address,
+    }
+
+
+def handle_get_deployment_info(args: argparse.Namespace):
+    network.connect(args.network)
+    info = get_deployment_info(args.address)
+    print(
+        f"Setup address: {info['setup_address']}, Merkle Distributor address: {info['merkle_distributor_address']}, Token address: {info['token_address']}"
+    )
+
 
 def score_validation(args: argparse.Namespace):
     with open(args.infile) as ifp:
@@ -19,25 +41,36 @@ def score_validation(args: argparse.Namespace):
 
     print(token_total, sum_individual)
 
+
 def gen_leaf(index, account, amount):
-    return Web3.solidityKeccak(["uint256", "address", "uint96"], [index, account, amount])
+    return Web3.solidityKeccak(
+        ["uint256", "address", "uint96"], [index, account, amount]
+    )
+
 
 def verify(root, leaf, proof):
     computed_hash = leaf
     for element in proof:
         if int(computed_hash, 16) < int(element, 16):
-            computed_hash = Web3.solidityKeccak(["bytes32", "bytes32"], [computed_hash, element]).hex()
+            computed_hash = Web3.solidityKeccak(
+                ["bytes32", "bytes32"], [computed_hash, element]
+            ).hex()
         else:
-            computed_hash = Web3.solidityKeccak(["bytes32", "bytes32"], [element, computed_hash]).hex()
+            computed_hash = Web3.solidityKeccak(
+                ["bytes32", "bytes32"], [element, computed_hash]
+            ).hex()
     return computed_hash == root
+
 
 def handle_gen_leaf(args: argparse.Namespace):
     leaf_raw = gen_leaf(args.index, args.account, args.amount)
     leaf = leaf_raw.hex()
     print(leaf)
 
+
 def handle_verify(args: argparse.Namespace):
     print(verify(args.root, args.leaf, args.proof))
+
 
 def collide(args: argparse.Namespace):
     merkle_root = args.root
@@ -52,9 +85,25 @@ def collide(args: argparse.Namespace):
             print("Collision!")
             break
 
+def claim_info(args: argparse.Namespace):
+    with open(args.infile) as ifp:
+        merkle_tree = json.load(ifp)
+
+    claimant_address = list(merkle_tree["claims"].keys())[args.claim]
+    claim_info = merkle_tree["claims"][claimant_address]
+
+    print(f"Claimant address: {claimant_address}")
+    print(f"Index: {claim_info['index']}")
+    print(f"Amount: {int(claim_info['amount'], 16)}")
+    print(f"Proof: {' '.join(claim_info['proof'])}")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="merkledrop challenge")
     subparsers = parser.add_subparsers()
+
+    deployment_info_parser = subparsers.add_parser("deployment-info")
+    Setup.add_default_arguments(deployment_info_parser, False)
+    deployment_info_parser.set_defaults(func=handle_get_deployment_info)
 
     amount_parser = subparsers.add_parser("amount")
     amount_parser.add_argument("infile")
@@ -79,7 +128,9 @@ if __name__ == "__main__":
     collide_parser.set_defaults(func=collide)
 
     merkle_distributor_parser = MerkleDistributor.generate_cli()
-    subparsers.add_parser("distributor", parents=[merkle_distributor_parser], add_help=False)
+    subparsers.add_parser(
+        "distributor", parents=[merkle_distributor_parser], add_help=False
+    )
 
     merkle_prover_parser = MerkleProof.generate_cli()
     subparsers.add_parser("prover", parents=[merkle_prover_parser], add_help=False)
@@ -89,6 +140,11 @@ if __name__ == "__main__":
 
     token_parser = Token.generate_cli()
     subparsers.add_parser("token", parents=[token_parser], add_help=False)
+
+    claim_info_parser = subparsers.add_parser("claim-info")
+    claim_info_parser.add_argument("infile")
+    claim_info_parser.add_argument("--claim", type=int)
+    claim_info_parser.set_defaults(func=claim_info)
 
     args = parser.parse_args()
     args.func(args)
